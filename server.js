@@ -152,16 +152,19 @@ function parseSessionMeta(jsonlPath) {
     // the conversation progresses; allowing those to win would silently undo an
     // intentional /rename or Hive rename every time Claude re-titles the session.
     let tailName = null;
+    let aiTitleBeforeCustom = false; // ai-title seen before any custom-title in newest-first scan
     for (let i = tailLines.length - 1; i >= 0; i--) {
       if (!tailLines[i].trim()) continue;
       try {
         const d = JSON.parse(tailLines[i]);
         if (d.type === 'custom-title' && d.customTitle) { tailName = d.customTitle; break; }
         if (d.type === 'agent-name' && d.agentName) { tailName = d.agentName; break; }
-        // ai-title intentionally skipped: auto-generated, must not override explicit renames
+        if (d.type === 'ai-title' && d.aiTitle && tailName === null) aiTitleBeforeCustom = true;
       } catch {}
     }
     if (tailName !== null) out.name = tailName;
+    out._hasExplicitTitle = tailName !== null;
+    out._aiTitleAfterCustom = aiTitleBeforeCustom; // ai-title is newer than our custom-title
     // Head fallback: short sessions whose only assistant turn is near the top.
     if (!out.model) {
       for (const line of headStr.split('\n')) {
@@ -192,6 +195,21 @@ function parseSessionMetaCached(jsonlPath) {
   } catch {
     return parseSessionMeta(jsonlPath);
   }
+}
+
+// Re-append custom-title to JSONL so Claude Code's UI shows the correct name
+// when the session is next opened. Fires only when ai-title is newer than our
+// custom-title (i.e. Claude rewrote the title after our rename), or when
+// customName exists in Hive meta but no custom-title entry is in the JSONL yet.
+function reappendCustomTitleIfStale(jsonlPath, jm, sm) {
+  if (!jsonlPath) return;
+  const nameToPin = sm.customName || (jm._hasExplicitTitle ? jm.name : null);
+  if (!nameToPin) return;
+  const needsReappend = jm._aiTitleAfterCustom || (sm.customName && !jm._hasExplicitTitle);
+  if (!needsReappend) return;
+  try {
+    fs.appendFileSync(jsonlPath, JSON.stringify({ type: 'custom-title', customTitle: nameToPin }) + '\n');
+  } catch {}
 }
 
 // ── Live process registry ─────────────────────────────────────────────────
@@ -350,6 +368,7 @@ app.get('/api/sessions', (req, res) => {
         const modelFromFlags = normalizeModel(extractFlag(respawnFlags, '--model'));
         const fullCwd = cwd || jm.cwd || HOME;
         const sm = meta[id] || {};
+        reappendCustomTitleIfStale(linkScanPath, jm, sm);
 
         sessions.set(id, {
           id,
@@ -391,6 +410,7 @@ app.get('/api/sessions', (req, res) => {
           const live = registry.get(sid);
           const fullCwd = jm.cwd || HOME;
           const sm = meta[sid] || {};
+          reappendCustomTitleIfStale(jsonlPath, jm, sm);
 
           sessions.set(sid, {
             id: sid,

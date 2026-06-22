@@ -147,19 +147,20 @@ function parseSessionMeta(jsonlPath) {
         if (out.model && out.kind) break;
       } catch {}
     }
-    // Latest rename in the tail (newest-first). Scanned separately so the model
-    // early-break above doesn't miss a custom-title that sits before the last message.
+    // Latest EXPLICIT rename in the tail (newest-first). Only custom-title and
+    // agent-name — NOT ai-title. Claude Code auto-generates ai-title entries as
+    // the conversation progresses; allowing those to win would silently undo an
+    // intentional /rename or Hive rename every time Claude re-titles the session.
     let tailName = null;
     for (let i = tailLines.length - 1; i >= 0; i--) {
       if (!tailLines[i].trim()) continue;
       try {
         const d = JSON.parse(tailLines[i]);
         if (d.type === 'custom-title' && d.customTitle) { tailName = d.customTitle; break; }
-        if (d.type === 'ai-title' && d.aiTitle) { tailName = d.aiTitle; break; }
         if (d.type === 'agent-name' && d.agentName) { tailName = d.agentName; break; }
+        // ai-title intentionally skipped: auto-generated, must not override explicit renames
       } catch {}
     }
-    // Tail name overrides head name: it is always the most recent /rename.
     if (tailName !== null) out.name = tailName;
     // Head fallback: short sessions whose only assistant turn is near the top.
     if (!out.model) {

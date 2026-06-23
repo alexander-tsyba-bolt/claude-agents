@@ -1030,6 +1030,14 @@
   }
 
   async function deleteSession(id) {
+    const s = sessionMap.get(id);
+    const termIdsToClose = [];
+    for (const [termId, t] of openTerminals) {
+      if (t.sessionId === id || (s && t.pendingCwd === s.cwd)) {
+        termIdsToClose.push(termId);
+      }
+    }
+    termIdsToClose.forEach(closeTerminal);
     await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
     loadSessions();
   }
